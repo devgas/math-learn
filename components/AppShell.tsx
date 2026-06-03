@@ -729,27 +729,27 @@ export function AppShell() {
                 <Zap aria-hidden className="h-10 w-10 text-mango" />
               </div>
               {renderModeStage()}
-              <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <input
                   ref={answerInputRef}
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
-                  className="min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 ring-transparent focus:ring-mango"
+                  className="min-w-0 min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 ring-transparent focus:ring-mango"
                   placeholder={t("answer")}
                 />
-                <div className="flex gap-3">
+                <div className="grid grid-cols-2 gap-3 md:flex">
                   <button
                     type="button"
                     onMouseDown={(event) => event.preventDefault()}
                     onClick={solveChallenge}
-                    className="inline-flex min-h-14 flex-1 items-center justify-center gap-2 rounded-2xl bg-mango px-6 font-black text-ink transition hover:-translate-y-1"
+                    className="inline-flex min-h-14 w-full items-center justify-center gap-2 rounded-2xl bg-mango px-4 font-black text-ink transition hover:-translate-y-1 md:flex-1 md:px-6"
                   >
                     {t("solve")} <ChevronRight aria-hidden className="h-5 w-5" />
                   </button>
                   <button
                     type="button"
                     onClick={skipChallenge}
-                    className="inline-flex min-h-14 items-center rounded-2xl border border-white/15 bg-white/10 px-5 font-black text-white transition hover:-translate-y-1"
+                    className="inline-flex min-h-14 w-full items-center justify-center rounded-2xl border border-white/15 bg-white/10 px-4 font-black text-white transition hover:-translate-y-1 md:w-auto md:px-5"
                   >
                     {t("skip")}
                   </button>
