@@ -1,0 +1,16 @@
+{
+  "name": "Math Quest Kids",
+  "short_name": "Math Quest",
+  "description": "Gamified math learning for kids.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f7fbff",
+  "theme_color": "#13b6b0",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml"
+    }
+  ]
+}
