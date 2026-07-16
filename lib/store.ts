@@ -3,7 +3,7 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { AccessibilitySettings, Difficulty, GameMode, Language, Player, Topic } from "@/types/app";
-import { achievements } from "@/config/game";
+import { achievements, gameModes, topics } from "@/config/game";
 import { xpForWin } from "@/lib/math";
 
 type AppState = {
@@ -85,6 +85,22 @@ function normalizeSettings(value: unknown): AccessibilitySettings {
     highContrast: isRecord(value) && typeof value.highContrast === "boolean" ? value.highContrast : false,
     soundEffects: isRecord(value) && typeof value.soundEffects === "boolean" ? value.soundEffects : true
   };
+}
+
+function normalizeLanguage(value: unknown): Language {
+  return value === "uk" || value === "cs" || value === "en" ? value : "en";
+}
+
+function normalizeDifficulty(value: unknown): Difficulty {
+  return value === "medium" || value === "hard" || value === "easy" ? value : "easy";
+}
+
+function normalizeTopic(value: unknown): Topic {
+  return typeof value === "string" && topics.includes(value as Topic) ? (value as Topic) : "addition";
+}
+
+function normalizeMode(value: unknown): GameMode {
+  return typeof value === "string" && gameModes.includes(value as GameMode) ? (value as GameMode) : "race";
 }
 
 function todayKey() {
@@ -207,6 +223,10 @@ export const useAppStore = create<AppState>()(
 
         return {
           ...nextState,
+          language: normalizeLanguage(nextState.language),
+          difficulty: normalizeDifficulty(nextState.difficulty),
+          topic: normalizeTopic(nextState.topic),
+          mode: normalizeMode(nextState.mode),
           player: normalizePlayer(nextState.player),
           settings: normalizeSettings(nextState.settings),
           unlockedThemes: Array.isArray(nextState.unlockedThemes) ? nextState.unlockedThemes.filter((item): item is string => typeof item === "string") : []

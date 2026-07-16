@@ -16,7 +16,6 @@ export default function Home() {
           void registration.unregister();
         }
       });
-      navigator.serviceWorker.register("/sw.js").catch(() => undefined);
     }
   }, []);
 
