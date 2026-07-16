@@ -1,23 +1,42 @@
-export function ProgressRing({ value, label }: { value: number; label: string }) {
+export function ProgressRing({
+  value,
+  label,
+  size = 112,
+  color = "#13b6b0",
+  trackColor = "#e6f3f5",
+  strokeWidth = 12
+}: {
+  value: number;
+  label?: string;
+  size?: number;
+  color?: string;
+  trackColor?: string;
+  strokeWidth?: number;
+}) {
   const safeValue = Math.max(0, Math.min(100, value));
+  const r = size / 2 - strokeWidth / 2;
+  const circumference = 2 * Math.PI * r;
   return (
-    <div className="relative grid h-28 w-28 place-items-center rounded-full bg-white shadow-soft">
-      <svg viewBox="0 0 120 120" className="absolute h-28 w-28 -rotate-90">
-        <circle cx="60" cy="60" r="48" stroke="#e6f3f5" strokeWidth="12" fill="none" />
+    <div
+      className="relative grid place-items-center rounded-full bg-white shadow-soft"
+      style={{ width: size, height: size }}
+    >
+      <svg viewBox={`0 0 ${size} ${size}`} className="absolute -rotate-90" style={{ width: size, height: size }}>
+        <circle cx={size / 2} cy={size / 2} r={r} stroke={trackColor} strokeWidth={strokeWidth} fill="none" />
         <circle
-          cx="60"
-          cy="60"
-          r="48"
-          stroke="#13b6b0"
-          strokeWidth="12"
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={color}
+          strokeWidth={strokeWidth}
           fill="none"
           strokeLinecap="round"
-          strokeDasharray={`${safeValue * 3.02} 302`}
+          strokeDasharray={`${(safeValue / 100) * circumference} ${circumference}`}
         />
       </svg>
       <div className="text-center">
         <strong className="block text-xl">{safeValue}%</strong>
-        <span className="text-xs text-slate-500">{label}</span>
+        {label ? <span className="text-xs text-slate-500">{label}</span> : null}
       </div>
     </div>
   );

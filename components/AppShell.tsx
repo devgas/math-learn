@@ -9,6 +9,8 @@ import {
   ChevronRight,
   Clock,
   Coins,
+  Contrast,
+  Crown,
   Flame,
   Gamepad2,
   Globe2,
@@ -17,16 +19,20 @@ import {
   Mic2,
   MoonStar,
   Play,
+  Puzzle,
   Rocket,
   Settings,
+  Shapes,
   ShieldCheck,
   Sparkles,
   Star,
+  TextCursorInput,
+  Timer,
   Trophy,
   Users,
-  Volume2,
   Zap
 } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarBadge } from "@/components/AvatarBadge";
 import { ProgressRing } from "@/components/ProgressRing";
@@ -42,6 +48,22 @@ const medalClass = {
   silver: "bg-slate-200 text-ink",
   bronze: "bg-orange-200 text-ink",
   none: "bg-slate-100 text-slate-600"
+};
+
+const modeIcon: Record<string, LucideIcon> = {
+  race: Rocket,
+  space: Sparkles,
+  puzzle: Puzzle,
+  timeAttack: Timer,
+  memory: Brain,
+  boss: Flame
+};
+
+const achievementIcon: Record<string, LucideIcon> = {
+  Star,
+  Flame,
+  Crown,
+  Shapes
 };
 
 export function AppShell() {
@@ -78,6 +100,8 @@ export function AppShell() {
   const [missionSaveMessage, setMissionSaveMessage] = useState("");
   const [memoryTries, setMemoryTries] = useState(0);
   const [memoryFeedback, setMemoryFeedback] = useState("");
+  const [answerState, setAnswerState] = useState<"idle" | "correct" | "wrong">("idle");
+  const [shakeKey, setShakeKey] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(difficultyConfig[difficulty].time);
   const [leaderboardScope, setLeaderboardScope] = useState("global");
   const [round, setRound] = useState(1);
@@ -114,6 +138,7 @@ export function AppShell() {
     setMissionSaveMessage("");
     setMemoryTries(0);
     setMemoryFeedback("");
+    setAnswerState("idle");
     setTimeRemaining(difficultyConfig[nextDifficulty].time);
     requestAnimationFrame(focusAnswerInput);
   }
@@ -159,6 +184,7 @@ export function AppShell() {
 
   function advanceRound() {
     setAnswer("");
+    setAnswerState("idle");
     setMemoryTries(0);
     setMemoryFeedback("");
 
@@ -425,6 +451,7 @@ export function AppShell() {
 
     const isCorrect = String(equation.answer).trim().toLowerCase() === answer.trim().toLowerCase();
     if (isCorrect) {
+      setAnswerState("correct");
       completeChallenge(100);
       confetti({ particleCount: 90, spread: 70, origin: { y: 0.62 } });
       if (settings.voiceSupport && typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -433,8 +460,16 @@ export function AppShell() {
       if (mode === "memory") {
         setMemoryFeedback("");
       }
-      advanceRound();
+      setTimeout(() => {
+        advanceRound();
+      }, 480);
       return;
+    }
+
+    setAnswerState("wrong");
+    setShakeKey((value) => value + 1);
+    if (settings.voiceSupport && typeof window !== "undefined" && "speechSynthesis" in window) {
+      speechSynthesis.speak(new SpeechSynthesisUtterance(t("wrong")));
     }
 
     if (mode === "memory") {
@@ -442,6 +477,7 @@ export function AppShell() {
         setMemoryTries(1);
         setMemoryFeedback(t("memoryTryAgain"));
         setAnswer("");
+        setAnswerState("idle");
         requestAnimationFrame(focusAnswerInput);
         return;
       }
@@ -451,7 +487,10 @@ export function AppShell() {
       setTimeout(() => {
         advanceRound();
       }, 900);
+      return;
     }
+
+    setTimeout(() => setAnswerState("idle"), 600);
   }
 
   function skipChallenge() {
@@ -459,6 +498,7 @@ export function AppShell() {
       return;
     }
 
+    setAnswerState("idle");
     advanceRound();
   }
 
@@ -467,7 +507,7 @@ export function AppShell() {
       <section className="relative overflow-hidden bg-[#dff8f5]">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_12%_18%,#ffcf72_0_5%,transparent_6%),radial-gradient(circle_at_88%_16%,#66a6ff_0_6%,transparent_7%),radial-gradient(circle_at_78%_86%,#ff8a7d_0_5%,transparent_6%)] opacity-40" />
         <div className="relative mx-auto grid max-w-7xl gap-8 px-4 py-5 sm:px-6 lg:grid-cols-[minmax(0,1fr)_390px] lg:px-8">
-          <nav className="col-span-full flex flex-wrap items-center justify-between gap-3">
+          <nav className="col-span-full flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white/70 px-3 py-2 backdrop-blur sm:px-4">
             <div className="flex items-center gap-3">
               <div className="grid h-12 w-12 place-items-center rounded-2xl bg-ink text-white">
                 <Brain aria-hidden className="h-7 w-7" />
@@ -490,6 +530,9 @@ export function AppShell() {
 
           <motion.div
             className="pb-10 pt-8 sm:pt-12 lg:pb-14"
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.4, ease: "easeOut" }}
           >
             {isAuthenticated ? (
               <p className="mb-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-bold text-aqua shadow-soft">
@@ -657,13 +700,19 @@ export function AppShell() {
                     key={item}
                     type="button"
                     onClick={() => changeMode(item)}
-                    className={`rounded-2xl border-2 p-4 text-left transition hover:-translate-y-1 ${
+                    className={`group flex items-start gap-3 rounded-2xl border-2 p-4 text-left transition hover:-translate-y-1 ${
                       modeTouched && mode === item ? "border-mango bg-[#fff4de]" : "border-slate-100 bg-slate-50"
                     }`}
                   >
-                    <strong>{t(item)}</strong>
-                    <span className="mt-2 flex items-center gap-2 text-sm text-slate-500">
-                      <Play aria-hidden className="h-4 w-4" /> {t("startMission")}
+                    <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-mango shadow-soft transition group-hover:scale-105">
+                      {(() => {
+                        const ModeIcon = modeIcon[item] ?? Play;
+                        return <ModeIcon aria-hidden className="h-6 w-6" />;
+                      })()}
+                    </span>
+                    <span className="min-w-0">
+                      <strong className="block">{t(item)}</strong>
+                      <span className="mt-1 block text-sm font-normal text-slate-500">{t(item + "Goal")}</span>
                     </span>
                   </button>
                 ))}
@@ -719,22 +768,37 @@ export function AppShell() {
               {isAuthenticated && missionSaveMessage ? <p className="mt-3 text-sm font-bold text-white/80">{missionSaveMessage}</p> : null}
             </div>
           ) : (
-            <div className="rounded-3xl bg-ink p-5 text-white">
+            <div key={shakeKey} className={`rounded-3xl bg-ink p-5 text-white ${answerState === "wrong" ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-mango">3. {t(mode)}</p>
-                  <h2 className="text-3xl font-black">{equation.prompt}</h2>
+                  <h2 className={`text-3xl font-black transition-colors ${answerState === "correct" ? "text-leaf" : answerState === "wrong" ? "text-coral" : ""}`}>{equation.prompt}</h2>
                   <p className="mt-2 max-w-sm text-sm font-bold text-white/70">{t(mode + "Goal")}</p>
                 </div>
                 <Zap aria-hidden className="h-10 w-10 text-mango" />
               </div>
+              {answerState === "correct" ? (
+                <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 text-sm font-black text-white">
+                  <CheckCircle2 aria-hidden className="h-4 w-4" /> {t("correct")}
+                </p>
+              ) : answerState === "wrong" && mode !== "memory" ? (
+                <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-coral px-4 py-1.5 text-sm font-black text-white">
+                  <Zap aria-hidden className="h-4 w-4" /> {t("wrong")}
+                </p>
+              ) : null}
               {renderModeStage()}
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <input
                   ref={answerInputRef}
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
-                  className="min-w-0 min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 ring-transparent focus:ring-mango"
+                  className={`min-w-0 min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 transition ${
+                    answerState === "correct"
+                      ? "bg-leaf/15 ring-leaf"
+                      : answerState === "wrong"
+                        ? "bg-coral/15 ring-coral"
+                        : "ring-transparent focus:ring-mango"
+                  }`}
                   placeholder={t("answer")}
                 />
                 <div className="grid grid-cols-2 gap-3 md:flex">
@@ -782,15 +846,19 @@ export function AppShell() {
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
               {achievements.map((item, index) => (
-                <motion.div
-                  key={item.id}
-                  className="rounded-2xl bg-slate-50 p-4"
-                  whileHover={{ rotate: index % 2 ? -1 : 1, y: -4 }}
-                >
-                  <Star aria-hidden className="mb-3 h-7 w-7 text-mango" />
-                  <strong>{item.id}</strong>
-                  <p className="text-sm text-slate-500">+{item.xp} XP</p>
-                </motion.div>
+                 <motion.div
+                   key={item.id}
+                   className="rounded-2xl border border-slate-100 bg-slate-50 p-4"
+                   whileHover={{ rotate: index % 2 ? -1 : 1, y: -4 }}
+                 >
+                   {(() => {
+                     const AchIcon = achievementIcon[item.icon] ?? Star;
+                     return <AchIcon aria-hidden className="mb-3 h-7 w-7 text-mango" />;
+                   })()}
+                   <strong className="block">{t(`ach-${item.id}`)}</strong>
+                   <p className="mt-1 text-sm text-slate-500">{t(`ach-${item.id}-desc`)}</p>
+                   <p className="mt-2 inline-block rounded-full bg-mango/15 px-2 py-0.5 text-xs font-black text-mango">+{item.xp} XP</p>
+                 </motion.div>
               ))}
             </div>
           </div>
@@ -811,8 +879,8 @@ export function AppShell() {
             <div className="space-y-3">
               {leaderboard.length ? (
                 leaderboard.map((entry, index) => (
-                  <div key={entry.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-slate-50 p-3">
-                    <span className={`grid h-9 w-9 place-items-center rounded-xl font-black `}>
+                  <div key={entry.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-slate-50 p-3 transition hover:bg-slate-100">
+                    <span className={`grid h-9 w-9 place-items-center rounded-full font-black shadow-soft ${medalClass[index < 3 ? (index === 0 ? "gold" : index === 1 ? "silver" : "bronze") : "none"]}`}>
                       {index + 1}
                     </span>
                     <div className="flex items-center gap-3">
@@ -824,7 +892,7 @@ export function AppShell() {
                         </p>
                       </div>
                     </div>
-                    <strong>{entry.score}</strong>
+                    <strong><span className="text-aqua">{entry.score}</span><span className="text-xs text-slate-400 font-medium"> pts</span></strong>
                   </div>
                 ))
               ) : (
@@ -864,7 +932,7 @@ export function AppShell() {
               <ShieldCheck aria-hidden className="h-7 w-7 text-leaf" /> {t("lessonProgress")}
             </h2>
             <div className="flex items-center gap-5">
-              <ProgressRing value={player.accuracy} label={t("accuracy")} />
+              <ProgressRing value={player.accuracy} label={t("accuracy")} size={120} color="#66c36f" trackColor="#e6f3e6" />
               <div>
                 <p className="text-sm text-slate-500">{t("xpProgress")}</p>
                 <strong className="text-3xl">{player.xp}/1000</strong>
@@ -957,8 +1025,8 @@ export function AppShell() {
                 [
                   ["dyslexiaFont", Sparkles],
                   ["voiceSupport", Mic2],
-                  ["largeText", Volume2],
-                  ["highContrast", ShieldCheck],
+                  ["largeText", TextCursorInput],
+                  ["highContrast", Contrast],
                   ["soundEffects", Flame]
                 ] as const
               ).map(([key, Icon]) => (
