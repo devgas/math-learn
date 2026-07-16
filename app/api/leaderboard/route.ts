@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { leaderboard } from "@/config/game";
+import { difficultyConfig, gameModes, leaderboard, topics } from "@/config/game";
 import { supabase, supabaseAdmin } from "@/lib/supabase";
 import type {
   LeaderboardEntryRow,
@@ -9,6 +9,7 @@ import type {
 } from "@/types/app";
 
 const GUEST_CHILD_ID = "local-child";
+const difficulties = Object.keys(difficultyConfig);
 
 function isMissionResultPayload(payload: unknown): payload is MissionResultPayload {
   if (!payload || typeof payload !== "object") {
@@ -21,14 +22,23 @@ function isMissionResultPayload(payload: unknown): payload is MissionResultPaylo
     typeof candidate.child_name === "string" &&
     typeof candidate.avatar === "string" &&
     typeof candidate.topic === "string" &&
+    topics.includes(candidate.topic as MissionResultPayload["topic"]) &&
     typeof candidate.difficulty === "string" &&
+    difficulties.includes(candidate.difficulty) &&
     typeof candidate.game_mode === "string" &&
+    gameModes.includes(candidate.game_mode as MissionResultPayload["game_mode"]) &&
     typeof candidate.score === "number" &&
     Number.isFinite(candidate.score) &&
+    candidate.score >= 0 &&
+    candidate.score <= 500 &&
     typeof candidate.accuracy === "number" &&
     Number.isFinite(candidate.accuracy) &&
+    candidate.accuracy >= 0 &&
+    candidate.accuracy <= 100 &&
     typeof candidate.fastest_time === "number" &&
-    Number.isFinite(candidate.fastest_time)
+    Number.isFinite(candidate.fastest_time) &&
+    candidate.fastest_time >= 1 &&
+    candidate.fastest_time <= 600
   );
 }
 
@@ -81,6 +91,16 @@ export async function POST(request: Request) {
   }
 
   try {
+    const { data: childProfile, error: childProfileError } = await supabaseAdmin
+      .from("child_profiles")
+      .select("id, name, avatar")
+      .eq("id", payload.child_id)
+      .maybeSingle<{ id: string; name: string; avatar: string }>();
+
+    if (childProfileError || !childProfile) {
+      return NextResponse.json({ error: "Child profile was not found." }, { status: 404 });
+    }
+
     const attemptPayload = {
       child_id: payload.child_id,
       topic: payload.topic,
@@ -120,8 +140,8 @@ export async function POST(request: Request) {
         .upsert(
           {
             child_id: payload.child_id,
-            child_name: payload.child_name,
-            avatar: payload.avatar,
+            child_name: childProfile.name,
+            avatar: childProfile.avatar,
             score: payload.score,
             accuracy: payload.accuracy,
             fastest_time: payload.fastest_time,

@@ -24,7 +24,7 @@ type AppState = {
   toggleSetting: (key: keyof AccessibilitySettings) => void;
   startMission: () => void;
   recordAttempt: (correct: boolean) => number;
-  finishMission: () => { leveledUp: boolean; newAchievements: string[] };
+  finishMission: () => { leveledUp: boolean; newAchievements: string[]; score: number; elapsed: number };
   claimDailyReward: () => boolean;
 };
 
@@ -34,10 +34,12 @@ const defaultPlayer: Player = {
   childName: "Child",
   avatar: "rocket",
   level: 1,
+  totalXp: 0,
   xp: 0,
   coins: 0,
   streak: 0,
   completedLessons: 0,
+  totalAttempts: 0,
   accuracy: 0,
   bestScore: 0,
   fastestTime: 0,
@@ -45,6 +47,45 @@ const defaultPlayer: Player = {
   unlockedAchievements: [],
   lastLevel: 1
 };
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function normalizePlayer(value: unknown): Player {
+  const storedPlayer = isRecord(value) ? value : {};
+  const level = typeof storedPlayer.level === "number" ? storedPlayer.level : defaultPlayer.level;
+  const xp = typeof storedPlayer.xp === "number" ? storedPlayer.xp : defaultPlayer.xp;
+  const totalXp = typeof storedPlayer.totalXp === "number" ? storedPlayer.totalXp : Math.max(0, (level - 1) * 1000 + xp);
+  const completedLessons =
+    typeof storedPlayer.completedLessons === "number" ? storedPlayer.completedLessons : defaultPlayer.completedLessons;
+  const totalAttempts =
+    typeof storedPlayer.totalAttempts === "number" ? storedPlayer.totalAttempts : completedLessons;
+
+  return {
+    ...defaultPlayer,
+    ...storedPlayer,
+    totalXp,
+    xp: totalXp % 1000,
+    level: Math.floor(totalXp / 1000) + 1,
+    completedLessons,
+    totalAttempts,
+    unlockedAchievements: Array.isArray(storedPlayer.unlockedAchievements)
+      ? storedPlayer.unlockedAchievements.filter((item): item is string => typeof item === "string")
+      : [],
+    lastLevel: typeof storedPlayer.lastLevel === "number" ? storedPlayer.lastLevel : level
+  };
+}
+
+function normalizeSettings(value: unknown): AccessibilitySettings {
+  return {
+    dyslexiaFont: isRecord(value) && typeof value.dyslexiaFont === "boolean" ? value.dyslexiaFont : false,
+    voiceSupport: isRecord(value) && typeof value.voiceSupport === "boolean" ? value.voiceSupport : true,
+    largeText: isRecord(value) && typeof value.largeText === "boolean" ? value.largeText : false,
+    highContrast: isRecord(value) && typeof value.highContrast === "boolean" ? value.highContrast : false,
+    soundEffects: isRecord(value) && typeof value.soundEffects === "boolean" ? value.soundEffects : true
+  };
+}
 
 function todayKey() {
   return new Date().toISOString().slice(0, 10);
@@ -72,45 +113,47 @@ export const useAppStore = create<AppState>()(
       setDifficulty: (difficulty) => set({ difficulty }),
       setTopic: (topic) => set({ topic }),
       setMode: (mode) => set({ mode }),
-      updateProfile: (profile) => set((state) => ({ player: { ...state.player, ...profile } })),
+      updateProfile: (profile) => set((state) => ({ player: normalizePlayer({ ...state.player, ...profile }) })),
       toggleSetting: (key) =>
         set((state) => ({ settings: { ...state.settings, [key]: !state.settings[key] } })),
       startMission: () => set({ missionCorrect: 0, missionStart: Date.now() }),
       recordAttempt: (correct) => {
         const { difficulty, player, missionCorrect } = get();
+        const totalAttempts = player.totalAttempts + 1;
         if (!correct) {
-          const completedLessons = player.completedLessons + 1;
           set({
             player: {
               ...player,
-              completedLessons,
-              accuracy: Math.round((player.accuracy * (completedLessons - 1)) / completedLessons)
+              totalAttempts,
+              accuracy: Math.round((player.accuracy * player.totalAttempts) / totalAttempts)
             }
           });
           return player.streak;
         }
 
         const gain = xpForWin(difficulty, player.streak);
-        const nextXp = player.xp + gain;
-        const nextLevel = Math.floor(nextXp / 1000) + 1;
+        const nextTotalXp = player.totalXp + gain;
         const completedLessons = player.completedLessons + 1;
         const prevCorrect = missionCorrect + 1;
         set({
           missionCorrect: prevCorrect,
           player: {
             ...player,
-            xp: nextXp % 1000,
-            level: nextLevel,
+            totalXp: nextTotalXp,
+            xp: nextTotalXp % 1000,
+            level: Math.floor(nextTotalXp / 1000) + 1,
             coins: player.coins + Math.round(gain / 5),
             streak: player.streak + 1,
             completedLessons,
-            accuracy: Math.round((player.accuracy * (completedLessons - 1) + 100) / completedLessons)
+            totalAttempts,
+            accuracy: Math.round((player.accuracy * player.totalAttempts + 100) / totalAttempts)
           }
         });
         return player.streak + 1;
       },
       finishMission: () => {
-        const { player, missionCorrect, missionStart } = get();
+        const { missionCorrect, missionStart } = get();
+        const player = normalizePlayer(get().player);
         const score = missionCorrect * 100;
         const elapsed = Math.max(1, Math.round((Date.now() - missionStart) / 1000));
 
@@ -133,7 +176,7 @@ export const useAppStore = create<AppState>()(
           }
         });
 
-        return { leveledUp, newAchievements: unlocked };
+        return { leveledUp, newAchievements: unlocked, score, elapsed };
       },
       claimDailyReward: () => {
         const { player } = get();
@@ -141,12 +184,13 @@ export const useAppStore = create<AppState>()(
         if (player.lastClaimedDate === key) {
           return false;
         }
-        const nextXp = player.xp + 50;
+        const nextTotalXp = player.totalXp + 50;
         set({
           player: {
             ...player,
-            xp: nextXp % 1000,
-            level: Math.floor(nextXp / 1000) + 1,
+            totalXp: nextTotalXp,
+            xp: nextTotalXp % 1000,
+            level: Math.floor(nextTotalXp / 1000) + 1,
             coins: player.coins + 12,
             lastClaimedDate: key
           }
@@ -154,7 +198,21 @@ export const useAppStore = create<AppState>()(
         return true;
       }
     }),
-    { name: "math-quest-state-v2", skipHydration: true }
+    {
+      name: "math-quest-state-v2",
+      skipHydration: true,
+      merge: (persistedState, currentState) => {
+        const storedState = isRecord(persistedState) ? persistedState : {};
+        const nextState = { ...currentState, ...storedState };
+
+        return {
+          ...nextState,
+          player: normalizePlayer(nextState.player),
+          settings: normalizeSettings(nextState.settings),
+          unlockedThemes: Array.isArray(nextState.unlockedThemes) ? nextState.unlockedThemes.filter((item): item is string => typeof item === "string") : []
+        };
+      }
+    }
   )
 );
 

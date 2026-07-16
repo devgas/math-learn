@@ -42,7 +42,7 @@ import type { LeaderboardEntry } from "@/types/app";
 import { makeEquation } from "@/lib/math";
 import { useAppStore } from "@/lib/store";
 import { translate } from "@/lib/i18n";
-import type { Difficulty, Language, Topic } from "@/types/app";
+import type { Difficulty, GameMode, Language, Topic } from "@/types/app";
 
 const medalClass = {
   gold: "bg-mango text-ink",
@@ -65,6 +65,90 @@ const achievementIcon: Record<string, LucideIcon> = {
   Flame,
   Crown,
   Shapes
+};
+
+function hashText(value: string) {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
+  }
+  return hash;
+}
+
+function seededIndex(seed: number, max: number) {
+  const x = Math.sin(seed * 127.1) * 43758.5453;
+  return Math.floor((x - Math.floor(x)) * max);
+}
+
+function shuffledAnswerChoices(answer: string | number, prompt: string, round: number) {
+  const correct = String(answer);
+  const numericAnswer = Number(answer);
+  const choices = new Set<string>([correct]);
+
+  if (Number.isFinite(numericAnswer)) {
+    const offsets = [2, -2, 5, -5, 10, -10, 1, -1];
+    for (const offset of offsets) {
+      if (choices.size >= 3) break;
+      const nextValue = numericAnswer + offset;
+      if (nextValue >= 0) {
+        choices.add(String(nextValue));
+      }
+    }
+  } else {
+    const [left = "1", right = "2"] = correct.split("/");
+    const numerator = Number(left);
+    const denominator = Number(right);
+    const fallbackChoices =
+      Number.isFinite(numerator) && Number.isFinite(denominator)
+        ? [`${numerator + 1}/${denominator}`, `${Math.max(1, numerator - 1)}/${denominator}`]
+        : ["8", "11"];
+
+    for (const item of fallbackChoices) {
+      if (choices.size >= 3) break;
+      choices.add(item);
+    }
+  }
+
+  const result = Array.from(choices);
+  const seed = hashText(`${prompt}:${correct}:${round}`);
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const swapIndex = seededIndex(seed + index, index + 1);
+    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
+  }
+
+  return result;
+}
+
+function hintKeyForTopic(topic: Topic) {
+  return `hint${topic.charAt(0).toUpperCase()}${topic.slice(1)}`;
+}
+
+function normalizeAnswerValue(value: string | number) {
+  const text = String(value).trim().toLowerCase();
+  const fractionMatch = text.match(/^(-?\d+)\s*\/\s*(-?\d+)$/);
+  if (!fractionMatch) {
+    return text;
+  }
+
+  const numerator = Number(fractionMatch[1]);
+  const denominator = Number(fractionMatch[2]);
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) {
+    return text;
+  }
+
+  return String(numerator / denominator);
+}
+
+type MissionRecommendation = {
+  textKey: string;
+  difficulty: Difficulty;
+  topic: Topic;
+  mode: GameMode;
+};
+
+type FinishedMission = {
+  score: number;
+  elapsed: number;
 };
 
 function celebrate() {
@@ -94,8 +178,9 @@ export function AppShell() {
     finishMission,
     claimDailyReward
   } = useAppStore();
+  const [hydrated, setHydrated] = useState(useAppStore.persist.hasHydrated());
   useEffect(() => {
-    void useAppStore.persist.rehydrate();
+    void Promise.resolve(useAppStore.persist.rehydrate()).then(() => setHydrated(true));
   }, []);
   useEffect(() => {
     document.documentElement.lang = language;
@@ -114,8 +199,10 @@ export function AppShell() {
   const [authMessage, setAuthMessage] = useState("");
   const [missionSaveState, setMissionSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [missionSaveMessage, setMissionSaveMessage] = useState("");
+  const [finishedMission, setFinishedMission] = useState<FinishedMission | null>(null);
   const [memoryTries, setMemoryTries] = useState(0);
   const [memoryFeedback, setMemoryFeedback] = useState("");
+  const [hintKey, setHintKey] = useState("");
   const [answerState, setAnswerState] = useState<"idle" | "correct" | "wrong">("idle");
   const [shakeKey, setShakeKey] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(difficultyConfig[difficulty].time);
@@ -127,11 +214,33 @@ export function AppShell() {
   const [levelUp, setLevelUp] = useState(false);
   const [flowStep, setFlowStep] = useState<1 | 2 | 3>(1);
   const gamesSectionRef = useRef<HTMLElement>(null);
+  const transitionTimersRef = useRef<number[]>([]);
   const [difficultyTouched, setDifficultyTouched] = useState(false);
   const [modeTouched, setModeTouched] = useState(false);
   const [topicTouched, setTopicTouched] = useState(false);
   const equation = useMemo(() => makeEquation(topic, difficulty, round), [topic, difficulty, round]);
+  const answerChoices = useMemo(() => shuffledAnswerChoices(equation.answer, equation.prompt, round), [equation.answer, equation.prompt, round]);
   const isAuthenticated = Boolean(player.parentName);
+  const recommendation = useMemo<MissionRecommendation>(() => {
+    if (player.completedLessons === 0) {
+      return { textKey: "recommendationStart", difficulty: "easy", topic: "addition", mode: "race" };
+    }
+
+    if (player.accuracy < 70) {
+      return { textKey: "recommendationPracticeAccuracy", difficulty: "easy", topic, mode: "memory" };
+    }
+
+    if (player.streak >= 5 && player.accuracy >= 85) {
+      return { textKey: "recommendationStreakChallenge", difficulty: difficulty === "hard" ? "hard" : "medium", topic, mode: "boss" };
+    }
+
+    if (player.fastestTime > 0 && player.accuracy >= 75) {
+      return { textKey: "recommendationSpeedRun", difficulty, topic: "timed", mode: "timeAttack" };
+    }
+
+    const nextTopic = topics[(topics.indexOf(topic) + 1) % topics.length] ?? "addition";
+    return { textKey: "recommendationNextTopic", difficulty, topic: nextTopic, mode };
+  }, [difficulty, mode, player.accuracy, player.completedLessons, player.fastestTime, player.streak, topic]);
 
   const rootClasses = [
     "min-h-screen",
@@ -149,15 +258,35 @@ export function AppShell() {
     answerInputRef.current?.focus({ preventScroll: true });
   }
 
+  function clearTransitionTimers() {
+    for (const timer of transitionTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    transitionTimersRef.current = [];
+  }
+
+  function scheduleTransition(callback: () => void, delay: number) {
+    const timer = window.setTimeout(() => {
+      transitionTimersRef.current = transitionTimersRef.current.filter((item) => item !== timer);
+      callback();
+    }, delay);
+    transitionTimersRef.current.push(timer);
+  }
+
+  useEffect(() => clearTransitionTimers, []);
+
   function restartMission(nextDifficulty: Difficulty = difficulty) {
+    clearTransitionTimers();
     setMissionComplete(false);
     setLevelUp(false);
     setRound(1);
     setAnswer("");
     setMissionSaveState("idle");
     setMissionSaveMessage("");
+    setFinishedMission(null);
     setMemoryTries(0);
     setMemoryFeedback("");
+    setHintKey("");
     setAnswerState("idle");
     setTimeRemaining(difficultyConfig[nextDifficulty].time);
     requestAnimationFrame(focusAnswerInput);
@@ -192,9 +321,22 @@ export function AppShell() {
   }
 
   function startMission() {
-    setFlowStep(1);
+    setFlowStep(3);
     startMissionStats();
     restartMission();
+    scrollGamesIntoView();
+  }
+
+  function applyRecommendation() {
+    setDifficultyTouched(true);
+    setModeTouched(true);
+    setTopicTouched(true);
+    setDifficulty(recommendation.difficulty);
+    setTopic(recommendation.topic);
+    setMode(recommendation.mode);
+    setFlowStep(3);
+    startMissionStats();
+    restartMission(recommendation.difficulty);
     scrollGamesIntoView();
   }
 
@@ -209,9 +351,11 @@ export function AppShell() {
     setAnswerState("idle");
     setMemoryTries(0);
     setMemoryFeedback("");
+    setHintKey("");
 
     if (round >= missionRounds) {
       const result = finishMission();
+      setFinishedMission({ score: result.score, elapsed: result.elapsed });
       if (result.leveledUp) {
         setLevelUp(result.leveledUp);
         celebrate();
@@ -225,7 +369,7 @@ export function AppShell() {
   }
 
   const saveMissionResult = useCallback(async () => {
-    if (!isAuthenticated || missionSaveState === "saving" || player.id === "local-child") {
+    if (!isAuthenticated || missionSaveState === "saving" || player.id === "local-child" || !finishedMission) {
       return;
     }
 
@@ -243,9 +387,9 @@ export function AppShell() {
           topic,
           difficulty,
           game_mode: mode,
-          score: player.bestScore,
+          score: finishedMission.score,
           accuracy: player.accuracy,
-          fastest_time: player.fastestTime || difficultyConfig[difficulty].time
+          fastest_time: finishedMission.elapsed
         })
       });
       const payload = (await response.json()) as { mode?: string; error?: string };
@@ -268,7 +412,7 @@ export function AppShell() {
       setMissionSaveState("error");
       setMissionSaveMessage(t("authFailed"));
     }
-  }, [difficulty, isAuthenticated, missionSaveState, mode, player.avatar, player.bestScore, player.childName, player.fastestTime, player.id, t, topic]);
+  }, [difficulty, finishedMission, isAuthenticated, missionSaveState, mode, player.accuracy, player.avatar, player.childName, player.id, t, topic]);
 
   useEffect(() => {
     if (missionComplete && isAuthenticated && missionSaveState === "idle") {
@@ -358,12 +502,12 @@ export function AppShell() {
     if (mode === "space") {
       return (
         <div className="mb-4 grid grid-cols-3 gap-3">
-          {[equation.answer, Number(equation.answer) + 2 || 8, Number(equation.answer) + 5 || 11].map((item) => (
+          {answerChoices.map((item) => (
             <button
               key={item}
               type="button"
               onClick={() => {
-                setAnswer(String(item));
+                setAnswer(item);
                 focusAnswerInput();
               }}
               className="rounded-2xl border border-white/15 bg-white/10 p-4 text-center text-xl font-black text-white transition hover:-translate-y-0.5 hover:bg-white/15"
@@ -390,7 +534,7 @@ export function AppShell() {
                 key={index}
                 type="button"
                 onClick={() => {
-                  setAnswer(String(equation.answer));
+                  setAnswer("");
                   focusAnswerInput();
                 }}
                 className={`grid h-16 place-items-center rounded-xl border text-lg font-black ${index < unlockedPieces ? "border-mango bg-mango text-ink" : "border-white/20 bg-white/10 text-white/70"}`}
@@ -490,6 +634,7 @@ export function AppShell() {
         childName: payload.profile?.name ?? player.childName,
         avatar: payload.profile?.avatar ?? player.avatar,
         level: payload.profile?.level ?? player.level,
+        totalXp: ((payload.profile?.level ?? player.level) - 1) * 1000 + (payload.profile?.xp ?? player.xp),
         xp: payload.profile?.xp ?? player.xp,
         coins: payload.profile?.coins ?? player.coins,
         streak: payload.profile?.streak ?? player.streak,
@@ -509,7 +654,7 @@ export function AppShell() {
       return;
     }
 
-    const isCorrect = String(equation.answer).trim().toLowerCase() === answer.trim().toLowerCase();
+    const isCorrect = normalizeAnswerValue(equation.answer) === normalizeAnswerValue(answer);
     if (isCorrect) {
       setAnswerState("correct");
       recordAttempt(true);
@@ -520,13 +665,14 @@ export function AppShell() {
       if (mode === "memory") {
         setMemoryFeedback("");
       }
-      setTimeout(() => {
+      scheduleTransition(() => {
         advanceRound();
       }, 480);
       return;
     }
 
     setAnswerState("wrong");
+    setHintKey(hintKeyForTopic(topic));
     setShakeKey((value) => value + 1);
     if (settings.voiceSupport && "speechSynthesis" in window) {
       speechSynthesis.speak(new SpeechSynthesisUtterance(t("wrong")));
@@ -536,6 +682,7 @@ export function AppShell() {
       if (memoryTries === 0) {
         setMemoryTries(1);
         setMemoryFeedback(t("memoryTryAgain"));
+        setHintKey("");
         setAnswer("");
         setAnswerState("idle");
         requestAnimationFrame(focusAnswerInput);
@@ -544,15 +691,16 @@ export function AppShell() {
 
       recordAttempt(false);
       setMemoryFeedback(`${t("correct")}: ${equation.answer}`);
+      setHintKey("");
       setAnswer("");
-      setTimeout(() => {
+      scheduleTransition(() => {
         advanceRound();
       }, 900);
       return;
     }
 
     recordAttempt(false);
-    setTimeout(() => setAnswerState("idle"), 600);
+    scheduleTransition(() => setAnswerState("idle"), 600);
   }
 
   function skipChallenge() {
@@ -561,7 +709,13 @@ export function AppShell() {
     }
 
     setAnswerState("idle");
+    setHintKey("");
+    recordAttempt(false);
     advanceRound();
+  }
+
+  if (!hydrated) {
+    return <main className="min-h-screen bg-[#f7fbff]" aria-label="Loading Math Quest Kids" />;
   }
 
   return (
@@ -845,13 +999,16 @@ export function AppShell() {
                 <Zap aria-hidden className="h-10 w-10 text-mango" />
               </div>
               {answerState === "correct" ? (
-                <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 text-sm font-black text-white">
+                <p aria-live="polite" className="mb-3 inline-flex items-center gap-2 rounded-full bg-leaf px-4 py-1.5 text-sm font-black text-white">
                   <CheckCircle2 aria-hidden className="h-4 w-4" /> {t("correct")}
                 </p>
               ) : answerState === "wrong" && mode !== "memory" ? (
-                <p className="mb-3 inline-flex items-center gap-2 rounded-full bg-coral px-4 py-1.5 text-sm font-black text-white">
-                  <Zap aria-hidden className="h-4 w-4" /> {t("wrong")}
-                </p>
+                <div aria-live="polite" className="mb-3 space-y-2">
+                  <p className="inline-flex items-center gap-2 rounded-full bg-coral px-4 py-1.5 text-sm font-black text-white">
+                    <Zap aria-hidden className="h-4 w-4" /> {t("wrong")}
+                  </p>
+                  {hintKey ? <p className="max-w-xl rounded-2xl bg-white/10 px-4 py-3 text-sm font-bold text-white/85">{t(hintKey)}</p> : null}
+                </div>
               ) : null}
               {renderModeStage()}
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
@@ -859,8 +1016,8 @@ export function AppShell() {
                   ref={answerInputRef}
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
-                  inputMode="numeric"
-                  pattern="[0-9]*"
+                  inputMode={topic === "fractions" ? "text" : "numeric"}
+                  pattern={topic === "fractions" ? undefined : "[0-9]*"}
                   autoComplete="off"
                   className={`min-w-0 min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 transition ${
                     answerState === "correct"
@@ -1021,7 +1178,14 @@ export function AppShell() {
             <h2 className="mb-4 flex items-center gap-2 text-2xl font-black">
               <Brain aria-hidden className="h-7 w-7 text-coral" /> {t("recommendation")}
             </h2>
-            <p className="leading-7 text-slate-600">{t("recommendationText")}</p>
+            <p className="leading-7 text-slate-600">{t(recommendation.textKey)}</p>
+            <button
+              type="button"
+              onClick={applyRecommendation}
+              className="mt-4 inline-flex min-h-12 items-center rounded-2xl bg-ink px-5 font-black text-white transition hover:-translate-y-1"
+            >
+              {t("applyRecommendation")}
+            </button>
           </div>
         </section>
 
@@ -1037,6 +1201,7 @@ export function AppShell() {
               <input
                 className="rounded-2xl bg-slate-50 p-4 outline-none focus:ring-4 focus:ring-aqua/30"
                 placeholder="parent@email.com"
+                aria-label={t("parentEmail")}
                 name="parentEmail"
                 value={authEmail}
                 onChange={(event) => setAuthEmail(event.target.value)}
@@ -1044,6 +1209,7 @@ export function AppShell() {
               <input
                 className="rounded-2xl bg-slate-50 p-4 outline-none focus:ring-4 focus:ring-aqua/30"
                 placeholder="Password"
+                aria-label={t("parentPassword")}
                 type="password"
                 name="parentPassword"
                 value={authPassword}
@@ -1068,11 +1234,19 @@ export function AppShell() {
               <input
                 className="rounded-2xl bg-slate-50 p-4 outline-none focus:ring-4 focus:ring-mango/30"
                 value={player.childName}
+                aria-label={t("childName")}
                 onChange={(event) => updateProfile({ childName: event.target.value })}
               />
               <div className="flex flex-wrap gap-2">
                 {avatars.map((avatar) => (
-                  <button key={avatar} type="button" onClick={() => updateProfile({ avatar })}>
+                  <button
+                    key={avatar}
+                    type="button"
+                    aria-label={`${t("avatar")}: ${avatar}`}
+                    aria-pressed={player.avatar === avatar}
+                    className={player.avatar === avatar ? "rounded-full ring-4 ring-mango" : "rounded-full"}
+                    onClick={() => updateProfile({ avatar })}
+                  >
                     <AvatarBadge avatar={avatar} />
                   </button>
                 ))}

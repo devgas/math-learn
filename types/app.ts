@@ -18,10 +18,12 @@ export type Player = {
   childName: string;
   avatar: string;
   level: number;
+  totalXp: number;
   xp: number;
   coins: number;
   streak: number;
   completedLessons: number;
+  totalAttempts: number;
   accuracy: number;
   bestScore: number;
   fastestTime: number;
