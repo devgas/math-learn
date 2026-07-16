@@ -25,6 +25,9 @@ export type Player = {
   accuracy: number;
   bestScore: number;
   fastestTime: number;
+  lastClaimedDate: string;
+  unlockedAchievements: string[];
+  lastLevel: number;
 };
 
 export type LeaderboardEntry = {

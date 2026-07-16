@@ -37,7 +37,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AvatarBadge } from "@/components/AvatarBadge";
 import { ProgressRing } from "@/components/ProgressRing";
 import { StatCard } from "@/components/StatCard";
-import { achievements, avatars, difficultyConfig, gameModes, leaderboard, topics } from "@/config/game";
+import { achievements, avatars, difficultyConfig, gameModes, topics } from "@/config/game";
+import type { LeaderboardEntry } from "@/types/app";
 import { makeEquation } from "@/lib/math";
 import { useAppStore } from "@/lib/store";
 import { translate } from "@/lib/i18n";
@@ -66,6 +67,13 @@ const achievementIcon: Record<string, LucideIcon> = {
   Shapes
 };
 
+function celebrate() {
+  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+    return;
+  }
+  confetti({ particleCount: 90, spread: 70, origin: { y: 0.62 } });
+}
+
 export function AppShell() {
   const missionRounds = 5;
   const {
@@ -81,17 +89,25 @@ export function AppShell() {
     setMode,
     updateProfile,
     toggleSetting,
-    completeChallenge,
+    startMission: startMissionStats,
+    recordAttempt,
+    finishMission,
     claimDailyReward
   } = useAppStore();
   useEffect(() => {
     void useAppStore.persist.rehydrate();
   }, []);
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   const t = (key: string) => translate(language, key);
   const [answer, setAnswer] = useState("");
   const answerInputRef = useRef<HTMLInputElement>(null);
   const [dailyClaimed, setDailyClaimed] = useState(false);
+  useEffect(() => {
+    setDailyClaimed(player.lastClaimedDate === new Date().toISOString().slice(0, 10));
+  }, [player.lastClaimedDate]);
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authLoading, setAuthLoading] = useState(false);
@@ -104,8 +120,11 @@ export function AppShell() {
   const [shakeKey, setShakeKey] = useState(0);
   const [timeRemaining, setTimeRemaining] = useState(difficultyConfig[difficulty].time);
   const [leaderboardScope, setLeaderboardScope] = useState("global");
+  const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
+  const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [round, setRound] = useState(1);
   const [missionComplete, setMissionComplete] = useState(false);
+  const [levelUp, setLevelUp] = useState(false);
   const [flowStep, setFlowStep] = useState<1 | 2 | 3>(1);
   const gamesSectionRef = useRef<HTMLElement>(null);
   const [difficultyTouched, setDifficultyTouched] = useState(false);
@@ -132,6 +151,7 @@ export function AppShell() {
 
   function restartMission(nextDifficulty: Difficulty = difficulty) {
     setMissionComplete(false);
+    setLevelUp(false);
     setRound(1);
     setAnswer("");
     setMissionSaveState("idle");
@@ -173,12 +193,14 @@ export function AppShell() {
 
   function startMission() {
     setFlowStep(1);
+    startMissionStats();
     restartMission();
     scrollGamesIntoView();
   }
 
   function jumpToStep(step: 1 | 2 | 3) {
     setFlowStep(step);
+    startMissionStats();
     restartMission();
   }
 
@@ -189,6 +211,11 @@ export function AppShell() {
     setMemoryFeedback("");
 
     if (round >= missionRounds) {
+      const result = finishMission();
+      if (result.leveledUp) {
+        setLevelUp(result.leveledUp);
+        celebrate();
+      }
       setMissionComplete(true);
       return;
     }
@@ -248,6 +275,39 @@ export function AppShell() {
       void saveMissionResult();
     }
   }, [isAuthenticated, missionComplete, missionSaveState, saveMissionResult]);
+
+  useEffect(() => {
+    let active = true;
+    async function loadLeaderboard() {
+      try {
+        const response = await fetch("/api/leaderboard");
+        const payload = (await response.json()) as { entries?: Array<Record<string, unknown>> };
+        if (!active || !Array.isArray(payload.entries)) {
+          return;
+        }
+        const entries: LeaderboardEntry[] = payload.entries.map((row, index) => ({
+          id: String(row.id ?? index),
+          name: String(row.child_name ?? "Player"),
+          avatar: String(row.avatar ?? "rocket"),
+          score: Number(row.score ?? 0),
+          accuracy: Number(row.accuracy ?? 0),
+          fastestTime: Number(row.fastest_time ?? 0),
+          medal: index === 0 ? "gold" : index === 1 ? "silver" : index === 2 ? "bronze" : "none"
+        }));
+        setLeaderboardData(entries);
+      } catch {
+        setLeaderboardData([]);
+      } finally {
+        if (active) {
+          setLeaderboardLoading(false);
+        }
+      }
+    }
+    void loadLeaderboard();
+    return () => {
+      active = false;
+    };
+  }, [missionSaveState]);
 
   useEffect(() => {
     if (mode === "timeAttack" && !missionComplete) {
@@ -452,9 +512,9 @@ export function AppShell() {
     const isCorrect = String(equation.answer).trim().toLowerCase() === answer.trim().toLowerCase();
     if (isCorrect) {
       setAnswerState("correct");
-      completeChallenge(100);
-      confetti({ particleCount: 90, spread: 70, origin: { y: 0.62 } });
-      if (settings.voiceSupport && typeof window !== "undefined" && "speechSynthesis" in window) {
+      recordAttempt(true);
+      celebrate();
+      if (settings.voiceSupport && "speechSynthesis" in window) {
         speechSynthesis.speak(new SpeechSynthesisUtterance(t("correct")));
       }
       if (mode === "memory") {
@@ -468,7 +528,7 @@ export function AppShell() {
 
     setAnswerState("wrong");
     setShakeKey((value) => value + 1);
-    if (settings.voiceSupport && typeof window !== "undefined" && "speechSynthesis" in window) {
+    if (settings.voiceSupport && "speechSynthesis" in window) {
       speechSynthesis.speak(new SpeechSynthesisUtterance(t("wrong")));
     }
 
@@ -482,6 +542,7 @@ export function AppShell() {
         return;
       }
 
+      recordAttempt(false);
       setMemoryFeedback(`${t("correct")}: ${equation.answer}`);
       setAnswer("");
       setTimeout(() => {
@@ -490,6 +551,7 @@ export function AppShell() {
       return;
     }
 
+    recordAttempt(false);
     setTimeout(() => setAnswerState("idle"), 600);
   }
 
@@ -722,6 +784,11 @@ export function AppShell() {
             <div className="rounded-3xl bg-ink p-5 text-white">
               <p className="text-sm font-bold text-mango">3. {t("missionComplete")}</p>
               <h2 className="mt-2 text-3xl font-black">{t("missionCompleteTitle")}</h2>
+              {levelUp ? (
+                <p className="mt-3 inline-flex items-center gap-2 rounded-full bg-mango px-4 py-1.5 text-sm font-black text-ink">
+                  <Star aria-hidden className="h-4 w-4" /> {t("levelUp")} {player.level}!
+                </p>
+              ) : null}
               <p className="mt-3 max-w-md text-sm font-bold text-white/75">
                 {isAuthenticated
                   ? missionSaveState === "saved"
@@ -772,7 +839,7 @@ export function AppShell() {
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <p className="text-sm font-bold text-mango">3. {t(mode)}</p>
-                  <h2 className={`text-3xl font-black transition-colors ${answerState === "correct" ? "text-leaf" : answerState === "wrong" ? "text-coral" : ""}`}>{equation.prompt}</h2>
+                  <h2 aria-live="polite" className={`text-3xl font-black transition-colors ${answerState === "correct" ? "text-leaf" : answerState === "wrong" ? "text-coral" : ""}`}>{equation.prompt}</h2>
                   <p className="mt-2 max-w-sm text-sm font-bold text-white/70">{t(mode + "Goal")}</p>
                 </div>
                 <Zap aria-hidden className="h-10 w-10 text-mango" />
@@ -792,6 +859,9 @@ export function AppShell() {
                   ref={answerInputRef}
                   value={answer}
                   onChange={(event) => setAnswer(event.target.value)}
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  autoComplete="off"
                   className={`min-w-0 min-h-14 rounded-2xl border-0 px-4 text-xl font-black text-ink outline-none ring-4 transition ${
                     answerState === "correct"
                       ? "bg-leaf/15 ring-leaf"
@@ -799,6 +869,7 @@ export function AppShell() {
                         ? "bg-coral/15 ring-coral"
                         : "ring-transparent focus:ring-mango"
                   }`}
+                  aria-label={t("answer")}
                   placeholder={t("answer")}
                 />
                 <div className="grid grid-cols-2 gap-3 md:flex">
@@ -845,21 +916,26 @@ export function AppShell() {
               <Award aria-hidden className="h-7 w-7 text-mango" /> {t("achievements")}
             </h2>
             <div className="grid gap-3 sm:grid-cols-2">
-              {achievements.map((item, index) => (
-                 <motion.div
-                   key={item.id}
-                   className="rounded-2xl border border-slate-100 bg-slate-50 p-4"
-                   whileHover={{ rotate: index % 2 ? -1 : 1, y: -4 }}
-                 >
-                   {(() => {
-                     const AchIcon = achievementIcon[item.icon] ?? Star;
-                     return <AchIcon aria-hidden className="mb-3 h-7 w-7 text-mango" />;
-                   })()}
-                   <strong className="block">{t(`ach-${item.id}`)}</strong>
-                   <p className="mt-1 text-sm text-slate-500">{t(`ach-${item.id}-desc`)}</p>
-                   <p className="mt-2 inline-block rounded-full bg-mango/15 px-2 py-0.5 text-xs font-black text-mango">+{item.xp} XP</p>
-                 </motion.div>
-              ))}
+              {achievements.map((item, index) => {
+                const unlocked = player.unlockedAchievements.includes(item.id);
+                return (
+                  <motion.div
+                    key={item.id}
+                    className={`rounded-2xl border p-4 ${unlocked ? "border-leaf/40 bg-[#e2f8e6]" : "border-slate-100 bg-slate-50 opacity-75"}`}
+                    whileHover={{ rotate: index % 2 ? -1 : 1, y: -4 }}
+                  >
+                    {(() => {
+                      const AchIcon = achievementIcon[item.icon] ?? Star;
+                      return <AchIcon aria-hidden className={`mb-3 h-7 w-7 ${unlocked ? "text-leaf" : "text-slate-400"}`} />;
+                    })()}
+                    <strong className="block">{t(`ach-${item.id}`)}</strong>
+                    <p className="mt-1 text-sm text-slate-500">{t(`ach-${item.id}-desc`)}</p>
+                    <span className={`mt-2 inline-block rounded-full px-2 py-0.5 text-xs font-black ${unlocked ? "bg-leaf/20 text-leaf" : "bg-slate-200 text-slate-500"}`}>
+                      {unlocked ? `${t("unlocked")}` : `+${item.xp} XP`}
+                    </span>
+                  </motion.div>
+                );
+              })}
             </div>
           </div>
 
@@ -877,8 +953,10 @@ export function AppShell() {
               </div>
             </div>
             <div className="space-y-3">
-              {leaderboard.length ? (
-                leaderboard.map((entry, index) => (
+              {leaderboardLoading ? (
+                <div className="rounded-2xl bg-slate-50 p-5 text-sm font-bold text-slate-400">{t("loading")}</div>
+              ) : leaderboardData.length ? (
+                leaderboardData.slice(0, leaderboardScope === "weekly" ? 10 : 50).map((entry, index) => (
                   <div key={entry.id} className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-slate-50 p-3 transition hover:bg-slate-100">
                     <span className={`grid h-9 w-9 place-items-center rounded-full font-black shadow-soft ${medalClass[index < 3 ? (index === 0 ? "gold" : index === 1 ? "silver" : "bronze") : "none"]}`}>
                       {index + 1}
@@ -917,8 +995,8 @@ export function AppShell() {
                 disabled={dailyClaimed}
                 onClick={() => {
                   if (!dailyClaimed) {
-                    claimDailyReward();
-                    setDailyClaimed(true);
+                    const claimed = claimDailyReward();
+                    setDailyClaimed(claimed);
                   }
                 }}
                 className="mt-4 rounded-2xl bg-sky px-4 py-3 font-black text-white disabled:opacity-60"
