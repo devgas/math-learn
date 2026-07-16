@@ -51,41 +51,48 @@ export async function POST(request: Request) {
   const profileName = childName?.trim() || "Child";
   const profileAvatar = avatar || "rocket";
 
-  const login = await supabase.auth.signInWithPassword({
-    email: normalizedEmail,
-    password
-  });
+  try {
+    const login = await supabase.auth.signInWithPassword({
+      email: normalizedEmail,
+      password
+    });
 
-  if (!login.error && login.data.user) {
-    const profile = await syncChildProfile(login.data.user.id, profileName, profileAvatar);
+    if (!login.error && login.data.user) {
+      const profile = await syncChildProfile(login.data.user.id, profileName, profileAvatar);
+      return NextResponse.json({
+        status: "logged_in",
+        user: { id: login.data.user.id, email: login.data.user.email },
+        session: login.data.session,
+        profile
+      });
+    }
+
+    const signup = await supabase.auth.signUp({
+      email: normalizedEmail,
+      password,
+      options: {
+        data: { child_name: profileName, avatar: profileAvatar }
+      }
+    });
+
+    if (signup.error) {
+      return NextResponse.json({ error: signup.error.message }, { status: 400 });
+    }
+
+    const user = signup.data.user;
+    const profile = user ? await syncChildProfile(user.id, profileName, profileAvatar) : null;
+
     return NextResponse.json({
-      status: "logged_in",
-      user: { id: login.data.user.id, email: login.data.user.email },
-      session: login.data.session,
+      status: signup.data.session ? "registered" : "confirmation_required",
+      user: user ? { id: user.id, email: user.email } : null,
+      session: signup.data.session,
+      profileSaved: Boolean(profile),
       profile
     });
+  } catch {
+    return NextResponse.json(
+      { error: "Authentication service is temporarily unavailable. Please try again later." },
+      { status: 503 }
+    );
   }
-
-  const signup = await supabase.auth.signUp({
-    email: normalizedEmail,
-    password,
-    options: {
-      data: { child_name: profileName, avatar: profileAvatar }
-    }
-  });
-
-  if (signup.error) {
-    return NextResponse.json({ error: signup.error.message }, { status: 400 });
-  }
-
-  const user = signup.data.user;
-  const profile = user ? await syncChildProfile(user.id, profileName, profileAvatar) : null;
-
-  return NextResponse.json({
-    status: signup.data.session ? "registered" : "confirmation_required",
-    user: user ? { id: user.id, email: user.email } : null,
-    session: signup.data.session,
-    profileSaved: Boolean(profile),
-    profile
-  });
 }
