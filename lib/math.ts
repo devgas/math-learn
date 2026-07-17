@@ -148,8 +148,8 @@ function timedEquation(difficulty: Difficulty, round: number, salt: number): Equ
   return makeEquation(topic, difficulty, round);
 }
 
-export function makeEquation(topic: Topic, difficulty: Difficulty, round = 1) {
-  const topicSalt = topic.length;
+export function makeEquation(topic: Topic, difficulty: Difficulty, round = 1, missionSeed = 0) {
+  const topicSalt = topic.length + missionSeed * 17;
   if (topic === "addition") return additionEquation(difficulty, round, topicSalt);
   if (topic === "subtraction") return subtractionEquation(difficulty, round, topicSalt);
   if (topic === "multiplication") return multiplicationEquation(difficulty, round, topicSalt);

@@ -80,7 +80,17 @@ function seededIndex(seed: number, max: number) {
   return Math.floor((x - Math.floor(x)) * max);
 }
 
-function shuffledAnswerChoices(answer: string | number, prompt: string, round: number) {
+function createMissionSeed() {
+  if (typeof window !== "undefined" && window.crypto?.getRandomValues) {
+    const values = new Uint32Array(1);
+    window.crypto.getRandomValues(values);
+    return values[0];
+  }
+
+  return Math.floor(Math.random() * 1_000_000_000);
+}
+
+function shuffledAnswerChoices(answer: string | number, prompt: string, round: number, missionSeed: number) {
   const correct = String(answer);
   const numericAnswer = Number(answer);
   const choices = new Set<string>([correct]);
@@ -110,7 +120,7 @@ function shuffledAnswerChoices(answer: string | number, prompt: string, round: n
   }
 
   const result = Array.from(choices);
-  const seed = hashText(`${prompt}:${correct}:${round}`);
+  const seed = hashText(`${prompt}:${correct}:${round}:${missionSeed}`);
   for (let index = result.length - 1; index > 0; index -= 1) {
     const swapIndex = seededIndex(seed + index, index + 1);
     [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
@@ -210,6 +220,7 @@ export function AppShell() {
   const [leaderboardData, setLeaderboardData] = useState<LeaderboardEntry[]>([]);
   const [leaderboardLoading, setLeaderboardLoading] = useState(true);
   const [round, setRound] = useState(1);
+  const [missionSeed, setMissionSeed] = useState(0);
   const [missionComplete, setMissionComplete] = useState(false);
   const [levelUp, setLevelUp] = useState(false);
   const [flowStep, setFlowStep] = useState<1 | 2 | 3>(1);
@@ -218,8 +229,11 @@ export function AppShell() {
   const [difficultyTouched, setDifficultyTouched] = useState(false);
   const [modeTouched, setModeTouched] = useState(false);
   const [topicTouched, setTopicTouched] = useState(false);
-  const equation = useMemo(() => makeEquation(topic, difficulty, round), [topic, difficulty, round]);
-  const answerChoices = useMemo(() => shuffledAnswerChoices(equation.answer, equation.prompt, round), [equation.answer, equation.prompt, round]);
+  const equation = useMemo(() => makeEquation(topic, difficulty, round, missionSeed), [topic, difficulty, round, missionSeed]);
+  const answerChoices = useMemo(
+    () => shuffledAnswerChoices(equation.answer, equation.prompt, round, missionSeed),
+    [equation.answer, equation.prompt, round, missionSeed]
+  );
   const isAuthenticated = Boolean(player.parentName);
   const recommendation = useMemo<MissionRecommendation>(() => {
     if (player.completedLessons === 0) {
@@ -277,6 +291,7 @@ export function AppShell() {
 
   function restartMission(nextDifficulty: Difficulty = difficulty) {
     clearTransitionTimers();
+    setMissionSeed(createMissionSeed());
     setMissionComplete(false);
     setLevelUp(false);
     setRound(1);
