@@ -96,7 +96,7 @@ function shuffledAnswerChoices(answer: string | number, prompt: string, round: n
   const choices = new Set<string>([correct]);
 
   if (Number.isFinite(numericAnswer)) {
-    const offsets = [2, -2, 5, -5, 10, -10, 1, -1];
+    const offsets = [1, -1, 2, -2, 5, -5, 10, -10, 3, -3, 7, -7];
     for (const offset of offsets) {
       if (choices.size >= 3) break;
       const nextValue = numericAnswer + offset;
@@ -110,12 +110,29 @@ function shuffledAnswerChoices(answer: string | number, prompt: string, round: n
     const denominator = Number(right);
     const fallbackChoices =
       Number.isFinite(numerator) && Number.isFinite(denominator)
-        ? [`${numerator + 1}/${denominator}`, `${Math.max(1, numerator - 1)}/${denominator}`]
-        : ["8", "11"];
+        ? [
+            `${numerator + 1}/${denominator}`,
+            `${Math.max(1, numerator - 1)}/${denominator}`,
+            `${numerator + 2}/${denominator}`,
+            `${Math.max(1, numerator)}/${denominator + 1}`,
+            `${Math.max(1, numerator + 1)}/${denominator + 1}`
+          ]
+        : ["8", "11", "14", "17"];
 
     for (const item of fallbackChoices) {
       if (choices.size >= 3) break;
       choices.add(item);
+    }
+  }
+
+  if (choices.size < 3) {
+    const fallbackSeed = Math.abs(hashText(`${prompt}:${correct}:${round}:${missionSeed}`));
+    const fallbackBase = Number.isFinite(numericAnswer) ? numericAnswer : (fallbackSeed % 40) + 10;
+    let offset = 1;
+    while (choices.size < 3) {
+      const nextValue = fallbackBase + ((fallbackSeed + offset) % 19) + 1;
+      choices.add(String(nextValue));
+      offset += 1;
     }
   }
 
